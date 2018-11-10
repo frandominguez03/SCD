@@ -93,8 +93,9 @@ class ProdCons1SU : public HoareMonitor {
    num_celdas_total = 10;   //  núm. de entradas del buffer
  int                        // variables permanentes
    buffer[num_celdas_total],//  buffer de tamaño fijo, con los datos
-   pcima,          //  indice de celda de la próxima inserción
- CondVar libres, ocupadas;
+   cima;          //  indice de celda de la próxima inserción
+ CondVar libres;
+ CondVar ocupadas;
 
  public:                    // constructor y métodos públicos
    ProdCons1SU() ;           // constructor
@@ -149,7 +150,7 @@ void ProdCons1SU::escribir( int valor )
 
 void funcion_hebra_productora( MRef<ProdCons1SU> monitor, int num_hebra)
 {
-   for( unsigned i = 0 ; i < num_items_prods ; i++ )
+   for( unsigned i = 0 ; i < num_items ; i++ )
    {
       int valor = producir_dato(num_hebra) ;
       monitor->escribir( valor );
@@ -159,7 +160,7 @@ void funcion_hebra_productora( MRef<ProdCons1SU> monitor, int num_hebra)
 
 void funcion_hebra_consumidora( MRef<ProdCons1SU> monitor)
 {
-   for( unsigned i = 0 ; i < num_items_cons ; i++ )
+   for( unsigned i = 0 ; i < num_items ; i++ )
    {
       int valor = monitor->leer();
       consumir_dato( valor ) ;
@@ -176,15 +177,15 @@ int main()
 
    MRef<ProdCons1SU> monitor = Create<ProdCons1SU>();
 
-   thread hebra_productora[num_items_prods],
-          hebra_consumidora[num_items_cons];
+   thread hebra_productora[num_items],
+          hebra_consumidora[num_items];
 
-   for(int i=0; i<num_items_prods; i++){
+   for(int i=0; i<num_items; i++){
       hebra_productora[i] = thread(funcion_hebra_productora, monitor, i);
    }
 
-   for(int i=0; i<num_items_cons; i++){
-      hebra_consumidora[i] = thread(funcion_hebra_consumidora, monitor, i);
+   for(int i=0; i<num_items; i++){
+      hebra_consumidora[i] = thread(funcion_hebra_consumidora, monitor);
    }
 
    for(int i=0; i<num_items; i++){
