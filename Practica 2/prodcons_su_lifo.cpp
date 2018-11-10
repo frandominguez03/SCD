@@ -93,57 +93,54 @@ class ProdCons1SU : public HoareMonitor {
    num_celdas_total = 10;   //  núm. de entradas del buffer
  int                        // variables permanentes
    buffer[num_celdas_total],//  buffer de tamaño fijo, con los datos
-   cima;          //  indice de celda de la próxima inserción
+   primera_libre;          //  indice de celda de la próxima inserción
  CondVar libres;
  CondVar ocupadas;
 
  public:                    // constructor y métodos públicos
    ProdCons1SU() ;           // constructor
-   int  leer();                // extraer un valor (sentencia L) (consumidor)
-   void escribir( int valor ); // insertar un valor (sentencia E) (productor)
+   void  insertar(int dato);          // insertar un valor (sentencia E) (productor)
+   int extraer(); // extraer un valor (sentencia L) (productor)
 } ;
 // -----------------------------------------------------------------------------
 
 ProdCons1SU::ProdCons1SU()
 {
-   cima   = 0;
+   primera_libre   = 0;
    libres = newCondVar();
    ocupadas = newCondVar();
 }
 // -----------------------------------------------------------------------------
 
-int ProdCons1SU::leer(  )
+void ProdCons1SU::insertar(int dato)
 {
 
    // esperar bloqueado hasta que 0 < num_celdas_ocupadas
-   if ( cima == 0 ){
+   if ( primera_libre == num_celdas_total ){
       libres.wait();
    }
 
-   cima-- ;
-   const int valor = buffer[cima] ;
-
+   buffer[primera_libre] = dato;
+   primera_libre++;
 
    // señalar al productor que hay un hueco libre, por si está esperando
    ocupadas.signal();
-
-   // devolver valor
-   return valor ;
 }
 
-void ProdCons1SU::escribir( int valor )
+int ProdCons1SU::extraer()
 {
    // esperar bloqueado hasta que num_celdas_ocupadas < num_celdas_total
-   if ( cima == num_celdas_total){
+   if ( primera_libre == 0){
       ocupadas.wait();
    }
 
-   // hacer la operación de inserción, actualizando estado del monitor
-   buffer[cima] = valor ;
-   cima++ ;
+   primera_libre--;
+   int valor = buffer[primera_libre];
 
    // señalar al consumidor que ya hay una celda ocupada (por si esta esperando)
    libres.signal();
+
+   return valor;
 }
 
 // -----------------------------------------------------------------------------
@@ -153,7 +150,7 @@ void funcion_hebra_productora( MRef<ProdCons1SU> monitor, int num_hebra)
    for( unsigned i = 0 ; i < num_items ; i++ )
    {
       int valor = producir_dato(num_hebra) ;
-      monitor->escribir( valor );
+      monitor->insertar( valor );
    }
 }
 // -----------------------------------------------------------------------------
@@ -162,7 +159,7 @@ void funcion_hebra_consumidora( MRef<ProdCons1SU> monitor)
 {
    for( unsigned i = 0 ; i < num_items ; i++ )
    {
-      int valor = monitor->leer();
+      int valor = monitor->extraer();
       consumir_dato( valor ) ;
    }
 }
