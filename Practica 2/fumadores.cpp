@@ -163,7 +163,7 @@ int main()
 
   MRef<Estanco> monitor = Create<Estanco>();
 
-  thread hebra_estanquero(funcion_hebra_estanquero);
+  thread hebra_estanquero(funcion_hebra_estanquero, monitor);
   thread hebra_fumador[num_fumadores];
 
   for(int i=0; i<num_fumadores; i++){
