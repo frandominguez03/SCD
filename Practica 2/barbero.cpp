@@ -91,7 +91,7 @@ void Barberia::cortarPelo(int i)
   mtx.unlock();
 
   /* Si la silla está vacía, manda una señal al barbero */
-  if(silla_vacia.get_nwt() == 0){
+  if(silla_vacia.get_nwt() != 0){
     silla_vacia.signal();
   }
 
@@ -108,7 +108,7 @@ void Barberia::cortarPelo(int i)
   cortando.wait();
 }
 
-/* Función siguienteCLiente. Pone el ingrediente i en el mostrador */
+/* Función siguienteCliente */
 void Barberia::siguienteCliente()
 {
   /* Si no hay clientes, espera hasta que llegue un cliente */
@@ -167,7 +167,7 @@ int main()
 
   MRef<Barberia> monitor = Create<Barberia>();
 
-  thread hebra_barbero(funcion_hebra_barbero);
+  thread hebra_barbero(funcion_hebra_barbero, monitor);
   thread hebra_cliente[num_clientes];
 
   for(int i=0; i<num_clientes; i++){

@@ -18,7 +18,9 @@ using namespace HM ;
 
 /* Variables globales */
 constexpr int
-   num_items  = 40;        // número de items a producir/consumir
+   num_items  = 40,        // número de items a producir/consumir
+   num_productores = 8,
+   num_consumidores = 5;
 
 unsigned
    cont_prod[num_items] = {0}, // contadores de verificación: producidos
@@ -33,13 +35,13 @@ template< int min, int max > int aleatorio()
 }
 
 /* Función producir dato */
-int producir_dato(int indice)
+int producir_dato()
 {
-   static int contador = {0} ;
+   static int contador = 0 ;
    this_thread::sleep_for( chrono::milliseconds( aleatorio<20,100>() ));
-   cout << "hebra productora: " << indice << ", produce: " << contador << endl << flush ;
-   cont_prod[indice]++; 
-   return contador;
+   cout <<  "producido: " << contador << endl << flush ;
+   cont_prod[contador]++; 
+   return contador++;
 }
 
 /* Función consumir dato */
@@ -53,15 +55,6 @@ void consumir_dato( unsigned dato )
    cont_cons[dato] ++ ;
    this_thread::sleep_for( chrono::milliseconds( aleatorio<20,100>() ));
    cout << "                  consumido: " << dato << endl ;
-}
-
-void ini_contadores()
-{
-   for( unsigned i = 0 ; i < num_items ; i++ )
-   {
-      cont_prod[i] = 0 ;
-      cont_cons[i] = 0 ;
-   }
 }
 
 void test_contadores()
@@ -89,28 +82,27 @@ void test_contadores()
 /* Clase del Monitor para ProdCons*/
 class ProdCons1SU : public HoareMonitor {
  private:
- static const int           // constantes:
-   num_celdas_total = 10;   //  núm. de entradas del buffer
- int                        // variables permanentes
-   buffer[num_celdas_total],//  buffer de tamaño fijo, con los datos
-   primera_libre;          //  indice de celda de la próxima inserción
+ static const int           
+   num_celdas_total = 10;   
+ int
+   buffer[num_celdas_total],
+   primera_libre;
  CondVar libres;
  CondVar ocupadas;
 
- public:                    // constructor y métodos públicos
-   ProdCons1SU() ;           // constructor
-   void  insertar(int dato);          // insertar un valor (sentencia E) (productor)
-   int extraer(); // extraer un valor (sentencia L) (productor)
+ public:                    
+   ProdCons1SU() ;           
+   void  insertar(int dato);
+   int extraer();
 } ;
-// -----------------------------------------------------------------------------
 
+/* Constructor por defecto */
 ProdCons1SU::ProdCons1SU()
 {
    primera_libre   = 0;
    libres = newCondVar();
    ocupadas = newCondVar();
 }
-// -----------------------------------------------------------------------------
 
 void ProdCons1SU::insertar(int dato)
 {
@@ -129,7 +121,6 @@ void ProdCons1SU::insertar(int dato)
 
 int ProdCons1SU::extraer()
 {
-   // esperar bloqueado hasta que num_celdas_ocupadas < num_celdas_total
    if ( primera_libre == 0){
       ocupadas.wait();
    }
@@ -143,24 +134,22 @@ int ProdCons1SU::extraer()
    return valor;
 }
 
-// -----------------------------------------------------------------------------
 
-void funcion_hebra_productora( MRef<ProdCons1SU> monitor, int num_hebra)
+void funcion_hebra_productora( MRef<ProdCons1SU> monitor, int num_productores)
 {
-   for( unsigned i = 0 ; i < num_items ; i++ )
+   for( unsigned i = 0 ; i < num_items/num_productores ; i++ )
    {
-      int valor = producir_dato(num_hebra) ;
+      int valor = producir_dato() ;
       monitor->insertar( valor );
    }
 }
-// -----------------------------------------------------------------------------
 
-void funcion_hebra_consumidora( MRef<ProdCons1SU> monitor)
+void funcion_hebra_consumidora( MRef<ProdCons1SU> monitor, int num_consumidores)
 {
-   for( unsigned i = 0 ; i < num_items ; i++ )
+   for( unsigned i = 0 ; i < num_items/num_consumidores ; i++ )
    {
       int valor = monitor->extraer();
-      consumir_dato( valor ) ;
+      consumir_dato(valor) ;
    }
 }
 // *****************************************************************************
@@ -174,22 +163,25 @@ int main()
 
    MRef<ProdCons1SU> monitor = Create<ProdCons1SU>();
 
-   thread hebra_productora[num_items],
-          hebra_consumidora[num_items];
+   thread hebra_productora[num_productores],
+          hebra_consumidora[num_consumidores];
 
-   for(int i=0; i<num_items; i++){
-      hebra_productora[i] = thread(funcion_hebra_productora, monitor, i);
+   for(int i=0; i<num_productores; i++){
+      hebra_productora[i] = thread(funcion_hebra_productora, monitor, num_productores);
    }
 
-   for(int i=0; i<num_items; i++){
-      hebra_consumidora[i] = thread(funcion_hebra_consumidora, monitor);
+   for(int i=0; i<num_consumidores; i++){
+      hebra_consumidora[i] = thread(funcion_hebra_consumidora, monitor, num_consumidores);
    }
 
-   for(int i=0; i<num_items; i++){
+   for(int i=0; i<num_productores; i++){
       hebra_productora[i].join();
-      hebra_consumidora[i].join();
    }
 
-   // comprobar que cada item se ha producido y consumido exactamente una vez
-   test_contadores() ;
+   for(int i=0; i<num_consumidores; i++){
+   	  hebra_consumidora[i].join();
+   }
+
+   /* Comprobaciones */
+   test_contadores();
 }
