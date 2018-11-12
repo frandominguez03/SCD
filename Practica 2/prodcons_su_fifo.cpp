@@ -1,32 +1,37 @@
 /*
 * Práctica 2 - Sistemas Concurrentes y Distribuidos
-* Problema de los productores y consumidores múltiples, versión LIFO
+* Problema de los productores y consumidores múltiples, versión FIFO
 * y señales SU (Señalar y Espera Urgente)
 *
 * autor: Francisco Domínguez Lorente
 */
 
 #include <iostream>
-#include <cassert>
 #include <iomanip>
+#include <cassert>
 #include <thread>
+#include <mutex>
 #include <random>
 #include "HoareMonitor.h"
 
-using namespace std ;
-using namespace HM ;
+using namespace std;
+using namespace HM;
 
-/* Variables globales */
 constexpr int
-   num_items  = 40,        // número de items a producir/consumir
-   num_productores = 8,
-   num_consumidores = 5;
+   n_items  = 40,
+   num_hebras_prod=8,
+   num_hebras_cons=5;
+   
+int contador=0, num_ocupadas=0;
+
+mutex
+   mtx;
 
 unsigned
-   cont_prod[num_items] = {0}, // contadores de verificación: producidos
-   cont_cons[num_items] = {0}; // contadores de verificación: consumidos
+   cont_prod[n_items],
+   cont_cons[n_items], 
+   cont_num_prod[num_hebras_prod]={0}; 
 
-/* Plantilla para generar un entero aleatorio entre dos números, ambos incluidos */
 template< int min, int max > int aleatorio()
 {
   static default_random_engine generador( (random_device())() );
@@ -34,31 +39,50 @@ template< int min, int max > int aleatorio()
   return distribucion_uniforme( generador );
 }
 
-/* Función producir dato */
-int producir_dato()
+int producir_dato(int indice)
 {
-   static int contador = 0 ;
-   this_thread::sleep_for( chrono::milliseconds( aleatorio<20,100>() ));
-   cout <<  "producido: " << contador << endl << flush ;
-   cont_prod[contador]++; 
-   return contador++;
-}
+  this_thread::sleep_for( chrono::milliseconds( aleatorio<20,100>() ));
 
-/* Función consumir dato */
+  cout << "hebra numero: " << indice << "			produce: " << contador << endl << flush ;
+
+  contador = indice * (n_items/num_hebras_prod) + cont_num_prod[indice];
+  cont_num_prod[indice]++;
+  cont_prod[contador]++;
+
+  return contador;
+}
+//----------------------------------------------------------------------
+
 void consumir_dato( unsigned dato )
 {
-   assert( dato < num_items );
-   cont_cons[dato] ++ ;
+   if ( n_items <= dato )
+   {
+      cout << " dato === " << dato << ", num_items == " << n_items << endl ;
+      assert( dato < n_items );
+   }
+
+   cont_cons[dato]++;
    this_thread::sleep_for( chrono::milliseconds( aleatorio<20,100>() ));
    cout << "                  consumido: " << dato << endl ;
 }
+//----------------------------------------------------------------------
+
+void ini_contadores()
+{
+   for( unsigned i = 0 ; i < n_items ; i++ )
+   {  cont_prod[i] = 0 ;
+      cont_cons[i] = 0 ;
+   }
+}
+
+//----------------------------------------------------------------------
 
 void test_contadores()
 {
    bool ok = true ;
    cout << "comprobando contadores ...." << flush ;
 
-   for( unsigned i = 0 ; i < num_items ; i++ )
+   for( unsigned i = 0 ; i < n_items ; i++ )
    {
       if ( cont_prod[i] != 1 )
       {
@@ -75,108 +99,119 @@ void test_contadores()
       cout << endl << flush << "solución (aparentemente) correcta." << endl << flush ;
 }
 
-/* Clase del Monitor para ProdCons*/
-class ProdCons2SU : public HoareMonitor {
- private:
- static const int           
-   num_celdas_total = 10;   
- int
-   buffer[num_celdas_total],
-   primera_libre,
-   primera_ocupada;
- CondVar libres;
- CondVar ocupadas;
+// *****************************************************************************
+// clase para monitor buffer, version LIFO, semántica SC, un prod. y un cons.
 
- public:                    
-   ProdCons2SU() ;           
-   void  insertar(int dato);
-   int extraer();
+class ProdCons2SU : public HoareMonitor
+{
+ private:
+ static const int           // constantes:
+   num_celdas_total = 10;   //  núm. de entradas del buffer
+ int                        // variables permanentes
+   buffer[num_celdas_total],//  buffer de tamaño fijo, con los datos
+   primera_libre,          //  indice de celda de la próxima inserción
+   primera_ocupada;         
+
+ CondVar ocupadas, libres;
+
+ public:
+   ProdCons2SU() ;
+   int  leer();
+   void escribir( int valor );
 } ;
 
-/* Constructor por defecto */
 ProdCons2SU::ProdCons2SU()
 {
-   primera_libre   = 0;
-   primera_ocupada = 0;
-   libres = newCondVar();
-   ocupadas = newCondVar();
+   primera_libre = 0 ;
+   primera_ocupada = 0 ;
+   ocupadas=newCondVar();
+   libres=newCondVar();
 }
 
-void ProdCons2SU::insertar(int dato)
+int ProdCons2SU::leer()
 {
 
-   // esperar bloqueado hasta que 0 < num_celdas_ocupadas
-   if ( primera_libre == num_celdas_total ){
-      libres.wait();
-   }
-
-   buffer[primera_libre] = dato;
-   ocupadas.signal();
-   primera_libre = primera_libre + (primera_libre%num_celdas_total);
-}
-
-int ProdCons2SU::extraer()
-{
-   if ( primera_libre == 0){
+   if (num_ocupadas == 0){
       ocupadas.wait();
    }
 
-   int valor = buffer[primera_ocupada];
+   assert(0 <= primera_ocupada);
+   const int valor = buffer[primera_ocupada];
+   primera_ocupada=(primera_ocupada+1)%num_celdas_total;
+   num_ocupadas--;
+
    libres.signal();
-   primera_ocupada = primera_ocupada + (primera_ocupada%num_celdas_total);
 
-   return valor;
+   return valor ;
 }
+// -----------------------------------------------------------------------------
 
-
-void funcion_hebra_productora( MRef<ProdCons2SU> monitor, int num_productores)
+void ProdCons2SU::escribir(int valor)
 {
-   for( unsigned i = 0 ; i < num_items/num_productores ; i++ )
+
+   if (num_ocupadas == num_celdas_total){
+      libres.wait();
+   }
+
+   assert(primera_libre < num_celdas_total);
+
+   buffer[primera_libre] = valor;
+   primera_libre=(primera_libre+1)%num_celdas_total;
+   num_ocupadas++;
+
+   ocupadas.signal();
+
+}
+// *****************************************************************************
+// funciones de hebras
+
+// -----------------------------------------------------------------------------
+void funcion_hebra_productora( MRef<ProdCons2SU> monitor, int indice)
+{
+   for( unsigned i = 0 ; i < n_items/num_hebras_prod; i++ )
    {
-      int valor = producir_dato() ;
-      monitor->insertar( valor );
+      int valor = producir_dato(indice) ;
+      monitor->escribir(valor);
    }
 }
+// -----------------------------------------------------------------------------
 
-void funcion_hebra_consumidora( MRef<ProdCons2SU> monitor, int num_consumidores)
+void funcion_hebra_consumidora( MRef<ProdCons2SU> monitor )
 {
-   for( unsigned i = 0 ; i < num_items/num_consumidores ; i++ )
+   for( unsigned i = 0 ; i < n_items/num_hebras_cons ; i++ )
    {
-      int valor = monitor->extraer();
+      int valor = monitor->leer();
       consumir_dato(valor) ;
    }
 }
-// *****************************************************************************
-
+// -----------------------------------------------------------------------------
 int main()
 {
-   cout << "-------------------------------------------------------------------------------" << endl
-        << "Problema de los productores-consumidores (Multiples prod/cons, Monitor SC, buffer FIFO). " << endl
-        << "-------------------------------------------------------------------------------" << endl
-        << flush ;
+    cout << "-------------------------------------------------------------------------------" << endl
+          << "Problema de los productores-consumidores (1 prod/cons, Monitor SU, buffer FIFO). " << endl
+          << "-------------------------------------------------------------------------------" << endl
+          << flush ;
 
-   MRef<ProdCons2SU> monitor = Create<ProdCons2SU>();
+    MRef<ProdCons2SU> monitor = Create<ProdCons2SU>();
 
-   thread hebra_productora[num_productores],
-          hebra_consumidora[num_consumidores];
+    thread hebra_productora[num_hebras_prod], hebra_consumidora[num_hebras_cons];
 
-   for(int i=0; i<num_productores; i++){
-      hebra_productora[i] = thread(funcion_hebra_productora, monitor, num_productores);
-   }
+    for(int i=0; i<num_hebras_prod; i++){
+      hebra_productora[i]=thread(funcion_hebra_productora, monitor, i);      
+    }
 
-   for(int i=0; i<num_consumidores; i++){
-      hebra_consumidora[i] = thread(funcion_hebra_consumidora, monitor, num_consumidores);
-   }
+    for(int i=0; i<num_hebras_cons; i++){     
+      hebra_consumidora[i]=thread(funcion_hebra_consumidora, monitor);
+    }    
 
-   for(int i=0; i<num_productores; i++){
-      hebra_productora[i].join();
-   }
+    for(int i=0; i<num_hebras_prod; i++){
+      hebra_productora[i].join() ;
+    }
+    
+    for(int i=0; i<num_hebras_cons; i++){
+      hebra_consumidora[i].join() ;
+    }    
 
-   for(int i=0; i<num_consumidores; i++){
-      hebra_consumidora[i].join();
-   }
-
-   test_contadores();
    /* Comprobaciones */
-   
+   test_contadores() ;
 }
